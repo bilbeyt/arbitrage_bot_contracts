@@ -21,7 +21,6 @@ contract UniswapV3BotContract is Ownable, Pausable {
     address private constant QUOTER_ADDRESS =
         0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6;
 
-    uint256 private deadline = block.timestamp + 1 days;
     uint256 private constant MAX_INT =
         115792089237316195423570985008687907853269984665640564039457584007913129639935;
 
@@ -82,7 +81,7 @@ contract UniswapV3BotContract is Ownable, Pausable {
                 tokenOut: _toToken,
                 fee: _fee,
                 recipient: address(this),
-                deadline: deadline,
+                deadline: block.timestamp + 1 days,
                 amountIn: _amountIn,
                 amountOutMinimum: amountRequired,
                 sqrtPriceLimitX96: 0
