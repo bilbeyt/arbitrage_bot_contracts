@@ -9,7 +9,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "v3-core/interfaces/IUniswapV3Pool.sol";
 import "v3-core/interfaces/IUniswapV3Factory.sol";
 import "v3-periphery/interfaces/ISwapRouter.sol";
-import "v3-periphery/interfaces/IQuoter.sol";
+import "v3-periphery/interfaces/IQuoterV2.sol";
 
 contract UniswapV3BotContract is Ownable, Pausable {
     using SafeERC20 for IERC20;
@@ -19,10 +19,7 @@ contract UniswapV3BotContract is Ownable, Pausable {
     address private constant ROUTER_ADDRESS =
         0xE592427A0AEce92De3Edee1F18E0157C05861564;
     address private constant QUOTER_ADDRESS =
-        0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6;
-
-    uint256 private constant MAX_INT =
-        115792089237316195423570985008687907853269984665640564039457584007913129639935;
+        0x61fFE014bA17989E743c5F6cB21bF9697530B21e;
 
     constructor() Ownable(msg.sender) {}
 
@@ -34,15 +31,17 @@ contract UniswapV3BotContract is Ownable, Pausable {
         _unpause();
     }
 
+    receive() external payable {}
+
     function fundContract(
         address _token,
         uint256 _amount
     ) public payable onlyOwner {
-        IERC20(_token).transferFrom(msg.sender, address(this), _amount);
+        IERC20(_token).safeTransferFrom(msg.sender, address(this), _amount);
     }
 
     function withdrawToken(address _token, uint256 _amount) public onlyOwner {
-        IERC20(_token).transferFrom(address(this), msg.sender, _amount);
+        IERC20(_token).safeTransferFrom(address(this), msg.sender, _amount);
     }
 
     function withdrawETH(uint256 _amount) public onlyOwner {
@@ -52,44 +51,6 @@ contract UniswapV3BotContract is Ownable, Pausable {
 
     function getBalanceOfToken(address _address) public view returns (uint256) {
         return IERC20(_address).balanceOf(address(this));
-    }
-
-    function placeTrade(
-        address _fromToken,
-        address _toToken,
-        uint24 _fee,
-        uint256 _amountIn
-    ) private returns (uint256) {
-        address pool = IUniswapV3Factory(FACTORY_ADDRESS).getPool(
-            _fromToken,
-            _toToken,
-            _fee
-        );
-        require(pool != address(0), "pool does not exist");
-
-        uint256 amountRequired = IQuoter(QUOTER_ADDRESS).quoteExactInputSingle(
-            _fromToken,
-            _toToken,
-            _fee,
-            _amountIn,
-            0
-        );
-
-        uint256 amountReceived = ISwapRouter(ROUTER_ADDRESS).exactInputSingle(
-            ISwapRouter.ExactInputSingleParams({
-                tokenIn: _fromToken,
-                tokenOut: _toToken,
-                fee: _fee,
-                recipient: address(this),
-                deadline: block.timestamp + 1 days,
-                amountIn: _amountIn,
-                amountOutMinimum: amountRequired,
-                sqrtPriceLimitX96: 0
-            })
-        );
-
-        require(amountReceived > 0, "Aborted tx: Trade returned zero");
-        return amountReceived;
     }
 
     function uniswapV3FlashCallback(
@@ -102,11 +63,11 @@ contract UniswapV3BotContract is Ownable, Pausable {
 
         (
             address _sender,
-            uint24 flashFee,
             address[] memory path,
             uint24[] memory fees,
+            uint24 flashFee,
             uint256 amount
-        ) = abi.decode(_data, (address, uint24, address[], uint24[], uint256));
+        ) = abi.decode(_data, (address, address[], uint24[], uint24, uint256));
 
         address pool = IUniswapV3Factory(FACTORY_ADDRESS).getPool(
             token0,
@@ -119,31 +80,39 @@ contract UniswapV3BotContract is Ownable, Pausable {
             "the sender should match this contract"
         );
 
+        bytes memory input = abi.encodePacked(
+            path[0],
+            fees[0],
+            path[1],
+            fees[1],
+            path[2],
+            fees[2],
+            path[3]
+        );
+
         uint256 fee = _fee0 > 0 ? _fee0 : _fee1;
         uint256 amountToRepay = amount + fee;
 
-        uint256 trade1AcquiredCoin = placeTrade(
-            path[0],
-            path[1],
-            fees[0],
-            amount
-        );
-        uint256 trade2AcquiredCoin = placeTrade(
-            path[1],
-            path[2],
-            fees[1],
-            trade1AcquiredCoin
-        );
-        uint256 trade3AcquiredCoin = placeTrade(
-            path[2],
-            path[3],
-            fees[2],
-            trade2AcquiredCoin
+        (
+            uint256 amountRequired,
+            uint160[] memory _price,
+            uint32[] memory _ticks,
+            uint256 _gas
+        ) = IQuoterV2(QUOTER_ADDRESS).quoteExactInput(input, amount);
+
+        uint256 amountReceived = ISwapRouter(ROUTER_ADDRESS).exactInput(
+            ISwapRouter.ExactInputParams({
+                path: input,
+                recipient: address(this),
+                deadline: block.timestamp + 1 days,
+                amountIn: amount,
+                amountOutMinimum: amountRequired
+            })
         );
 
-        require(trade3AcquiredCoin > amountToRepay, "not profitable");
+        require(amountReceived > amountToRepay, "not profitable");
 
-        IERC20(path[0]).transfer(pool, amountToRepay);
+        IERC20(path[0]).safeTransfer(pool, amountToRepay);
     }
 
     function startArbitrage(
@@ -153,9 +122,18 @@ contract UniswapV3BotContract is Ownable, Pausable {
         uint24[] calldata fees,
         uint256 _amount
     ) external whenNotPaused onlyOwner {
-        IERC20(path[0]).approve(address(ROUTER_ADDRESS), MAX_INT);
-        IERC20(path[1]).approve(address(ROUTER_ADDRESS), MAX_INT);
-        IERC20(path[2]).approve(address(ROUTER_ADDRESS), MAX_INT);
+        IERC20(path[0]).forceApprove(
+            address(ROUTER_ADDRESS),
+            type(uint256).max
+        );
+        IERC20(path[1]).forceApprove(
+            address(ROUTER_ADDRESS),
+            type(uint256).max
+        );
+        IERC20(path[2]).forceApprove(
+            address(ROUTER_ADDRESS),
+            type(uint256).max
+        );
 
         address pool = IUniswapV3Factory(FACTORY_ADDRESS).getPool(
             path[0],
@@ -165,23 +143,24 @@ contract UniswapV3BotContract is Ownable, Pausable {
 
         require(pool != address(0), "pool does not exist");
 
-        address token0 = IUniswapV3Pool(pool).token0();
-        address token1 = IUniswapV3Pool(pool).token1();
-
-        uint256 amount0Out = path[0] == token0 ? _amount : 0;
-        uint256 amount1Out = path[0] == token1 ? _amount : 0;
+        uint256 amount0Out = path[0] == IUniswapV3Pool(pool).token0()
+            ? _amount
+            : 0;
+        uint256 amount1Out = path[0] == IUniswapV3Pool(pool).token1()
+            ? _amount
+            : 0;
 
         bytes memory data = abi.encode(
             address(this),
-            flashFee,
             path,
             fees,
+            flashFee,
             _amount
         );
 
         IUniswapV3Pool(pool).flash(address(this), amount0Out, amount1Out, data);
-        IERC20(path[0]).approve(address(ROUTER_ADDRESS), 0);
-        IERC20(path[1]).approve(address(ROUTER_ADDRESS), 0);
-        IERC20(path[2]).approve(address(ROUTER_ADDRESS), 0);
+        IERC20(path[0]).forceApprove(address(ROUTER_ADDRESS), 0);
+        IERC20(path[1]).forceApprove(address(ROUTER_ADDRESS), 0);
+        IERC20(path[2]).forceApprove(address(ROUTER_ADDRESS), 0);
     }
 }
