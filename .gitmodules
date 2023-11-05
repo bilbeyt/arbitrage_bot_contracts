@@ -22,3 +22,6 @@
 [submodule "lib/universal-router"]
 	path = lib/universal-router
 	url = https://github.com/Uniswap/universal-router
+[submodule "lib/balancer-v2-monorepo"]
+	path = lib/balancer-v2-monorepo
+	url = https://github.com/balancer/balancer-v2-monorepo
