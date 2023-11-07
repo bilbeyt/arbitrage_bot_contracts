@@ -3,3 +3,4 @@
 @uniswap/v3-periphery=lib/v3-periphery/
 @uniswap/v2-periphery=lib/v2-periphery/
 @uniswap/universal-router/=lib/universal-router/
+solmate/=lib/solmate/
