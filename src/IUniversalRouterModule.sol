@@ -33,4 +33,6 @@ interface IUniversalRouterModule {
         address[] calldata path,
         address payer
     ) external;
+
+    function Sweep(address token, address recipient, uint256 amount) external;
 }
