@@ -104,7 +104,7 @@ contract UniswapBotContract is Ownable, IFlashLoanRecipient {
         uint256 payment = amounts[0] + feeAmounts[0];
         uint256 oldBal = IERC20(tokens[0]).balanceOf(address(this)) -
             amounts[0];
-        IERC20(tokens[0]).safeTransfer(ROUTER_ADDRESS, amounts[0]);
+        IERC20(tokens[0]).safeTransfer(routerAddress, amounts[0]);
         IUniversalRouter(routerAddress).execute(
             _commands,
             _inputs,
