@@ -13,17 +13,17 @@ import "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
 
 contract UniswapBotContract is Ownable, IFlashLoanRecipient {
     using SafeERC20 for IERC20;
+    address private immutable routerAddress;
+    address private immutable vaultAddress;
+    address private immutable v3QuoterAddress;
+    address private immutable v2QuoterAddress;
 
-    address private constant ROUTER_ADDRESS =
-        0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD;
-    address private constant VAULT_ADDRESS =
-        0xBA12222222228d8Ba445958a75a0704d566BF2C8;
-    address private constant QUOTER_ADDRESS =
-        0x61fFE014bA17989E743c5F6cB21bF9697530B21e;
-    address private constant V2_QUOTER_ADDRESS =
-        0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D;
-
-    constructor() Ownable() {}
+    constructor(address _RAddress, address _VAddress, address _v2QAddress, address _v3QAddress) Ownable() {
+        routerAddress = _RAddress;
+        vaultAddress = _VAddress;
+        v2QuoterAddress = _v2QAddress;
+        v3QuoterAddress = _v3QAddress;
+    }
 
     function getV3Quote(
         address[] calldata tokens,
@@ -31,7 +31,7 @@ contract UniswapBotContract is Ownable, IFlashLoanRecipient {
         uint256 amountIn
     ) public returns (uint256) {
         bytes memory path = getV3Path(tokens, fees);
-        (uint256 out, , , ) = IQuoterV2(QUOTER_ADDRESS).quoteExactInput(
+        (uint256 out, , , ) = IQuoterV2(v3QuoterAddress).quoteExactInput(
             path,
             amountIn
         );
@@ -42,7 +42,7 @@ contract UniswapBotContract is Ownable, IFlashLoanRecipient {
         address[] calldata tokens,
         uint256 amountIn
     ) public view returns (uint256) {
-        uint256[] memory amounts = IUniswapV2Router02(V2_QUOTER_ADDRESS)
+        uint256[] memory amounts = IUniswapV2Router02(v2QuoterAddress)
             .getAmountsOut(amountIn, tokens);
         return amounts[amounts.length - 1];
     }
@@ -88,7 +88,7 @@ contract UniswapBotContract is Ownable, IFlashLoanRecipient {
         uint256[] memory amounts = new uint256[](1);
         assets[0] = IERC20(tokens[0]);
         amounts[0] = borrowAmount;
-        IVault(VAULT_ADDRESS).flashLoan(this, assets, amounts, data);
+        IVault(vaultAddress).flashLoan(this, assets, amounts, data);
     }
 
     function receiveFlashLoan(
@@ -97,7 +97,7 @@ contract UniswapBotContract is Ownable, IFlashLoanRecipient {
         uint256[] memory feeAmounts,
         bytes memory userData
     ) external override {
-        require(msg.sender == VAULT_ADDRESS, "caller should be vault");
+        require(msg.sender == vaultAddress, "caller should be vault");
         (address _sender, bytes memory _commands, bytes[] memory _inputs) = abi
             .decode(userData, (address, bytes, bytes[]));
         require(_sender == address(this), "address should be bot contract");
@@ -105,7 +105,7 @@ contract UniswapBotContract is Ownable, IFlashLoanRecipient {
         uint256 oldBal = IERC20(tokens[0]).balanceOf(address(this)) -
             amounts[0];
         IERC20(tokens[0]).safeTransfer(ROUTER_ADDRESS, amounts[0]);
-        IUniversalRouter(ROUTER_ADDRESS).execute(
+        IUniversalRouter(routerAddress).execute(
             _commands,
             _inputs,
             block.timestamp + 1 days
@@ -113,7 +113,7 @@ contract UniswapBotContract is Ownable, IFlashLoanRecipient {
         uint256 newBal = IERC20(tokens[0]).balanceOf(address(this));
 
         require(newBal > payment, "not profitable");
-        IERC20(tokens[0]).safeTransfer(VAULT_ADDRESS, payment);
+        IERC20(tokens[0]).safeTransfer(vaultAddress, payment);
         uint256 finalBal = IERC20(tokens[0]).balanceOf(address(this));
         require(finalBal > oldBal, "not profitable");
         IERC20(tokens[0]).safeTransfer(owner(), finalBal);
