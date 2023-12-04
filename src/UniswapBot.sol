@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+import "@openzeppelin/contracts/utils/Strings.sol";
 
 import "@balancer-labs/v2-interfaces/contracts/vault/IVault.sol";
 import "@balancer-labs/v2-interfaces/contracts/vault/IFlashLoanRecipient.sol";
@@ -195,7 +196,16 @@ contract UniswapBotV2 is Ownable, IFlashLoanRecipient {
         uint amount0Out = pair.token0() == tokenOut ? amountOut : 0;
         uint amount1Out = pair.token1() == tokenOut ? amountOut : 0;
         IERC20(tokenIn).safeTransfer(poolAddress, amountIn);
-        pair.swap(amount0Out, amount1Out, address(this), bytes(""));
+        try
+        pair.swap(amount0Out, amount1Out, address(this), bytes(""))
+        {} catch (bytes memory) {
+            revert(
+                string.concat(
+                "Execution reverted: ",
+                Strings.toHexString(poolAddress)
+            )
+            );
+        }
         return (tokenOut, amountOut);
     }
 
@@ -210,13 +220,26 @@ contract UniswapBotV2 is Ownable, IFlashLoanRecipient {
         uint160 sqrtPriceLimitX96 = zeroForOne
             ? MIN_SQRT_RATIO + 1
             : MAX_SQRT_RATIO - 1;
-        (int256 amount0, int256 amount1) = pool.swap(
+        (int256 amount0, int amount1) = (0, 0);
+        try
+        pool.swap(
             address(this),
             zeroForOne,
             int256(amountIn),
             sqrtPriceLimitX96,
             data
-        );
+        )
+        returns (int firstAmount, int secondAmount) {
+            amount0 = firstAmount;
+            amount1 = secondAmount;
+        } catch (bytes memory) {
+            revert(
+                string.concat(
+                "Execution reverted: ",
+                Strings.toHexString(poolAddress)
+            )
+            );
+        }
         address tokenOut = zeroForOne ? pool.token1() : pool.token0();
         return (tokenOut, uint(-(zeroForOne ? amount1 : amount0)));
     }
