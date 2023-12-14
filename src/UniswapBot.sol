@@ -217,7 +217,7 @@ contract UniswapBotV2 is Ownable, IFlashLoanRecipient {
         {} catch (bytes memory) {
             revert(
                 string.concat(
-                "Execution reverted: ",
+                "Malicious Pool: ",
                 Strings.toHexString(poolAddress)
             )
             );
@@ -251,7 +251,7 @@ contract UniswapBotV2 is Ownable, IFlashLoanRecipient {
         } catch (bytes memory) {
             revert(
                 string.concat(
-                "Execution reverted: ",
+                "Malicious Pool: ",
                 Strings.toHexString(poolAddress)
             )
             );
