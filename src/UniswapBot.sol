@@ -84,10 +84,20 @@ contract UniswapBotV2 is Ownable, IFlashLoanRecipient {
         ReserveParams calldata params
     ) public view returns (uint[] memory) {
         uint[] memory reserves = new uint[](2);
-        uint reserve0 = IERC20(params.token0).balanceOf(params.pool);
-        uint reserve1 = IERC20(params.token1).balanceOf(params.pool);
-        reserves[0] = reserve0;
-        reserves[1] = reserve1;
+        try IERC20(params.token0).balanceOf(params.pool) returns (
+            uint reserve0
+        ) {
+            reserves[0] = reserve0;
+        } catch (bytes memory) {
+            reserves[0] = 0;
+        }
+        try IERC20(params.token1).balanceOf(params.pool) returns (
+            uint reserve1
+        ) {
+            reserves[1] = reserve1;
+        } catch (bytes memory) {
+            reserves[1] = 0;
+        }
         return reserves;
     }
 
@@ -128,20 +138,18 @@ contract UniswapBotV2 is Ownable, IFlashLoanRecipient {
         address token,
         uint amountIn
     ) internal view returns (address, uint) {
-        require(amountIn > 0, "UniswapV2Library: INSUFFICIENT_INPUT_AMOUNT");
         IUniswapV2Pair pair = IUniswapV2Pair(poolAddress);
-        (uint112 reserve0, uint112 reserve1, ) = pair.getReserves();
-        (address tokenOut, uint112 reserveIn, uint112 reserveOut) = token ==
+        (uint reserve0, uint reserve1, ) = pair.getReserves();
+        (address tokenOut, uint reserveIn, uint reserveOut) = token ==
         pair.token0()
             ? (pair.token1(), reserve0, reserve1)
             : (pair.token0(), reserve1, reserve0);
-        require(
-            reserveIn > 0 && reserveOut > 0,
-            "UniswapV2Library: INSUFFICIENT_LIQUIDITY"
-        );
-        uint amountInWithFee = amountIn * 997;
-        uint numerator = amountInWithFee * reserveOut;
-        uint denominator = reserveIn * 1000 + amountInWithFee;
+        if (amountIn <= 0 || reserveIn <= 0 || reserveOut <= 0) {
+            return (tokenOut, 0);
+        }
+        uint amountInWithFee = amountIn.mul(997);
+        uint numerator = amountInWithFee.mul(reserveOut);
+        uint denominator = reserveIn.mul(1000).add(amountInWithFee);
         uint amountOut = numerator / denominator;
         return (tokenOut, amountOut);
     }
@@ -165,7 +173,15 @@ contract UniswapBotV2 is Ownable, IFlashLoanRecipient {
             pool.fee(),
             0
         );
-        (uint amountOut, , , ) = quoter.quoteExactInputSingle(params);
+        uint amountOut = 0;
+        try quoter.quoteExactInputSingle(params) returns (
+            uint out,
+            uint160,
+            uint32,
+            uint
+        ) {
+            amountOut = out;
+        } catch (bytes memory) {}
         return (tokenOut, amountOut);
     }
 
@@ -220,7 +236,7 @@ contract UniswapBotV2 is Ownable, IFlashLoanRecipient {
         uint160 sqrtPriceLimitX96 = zeroForOne
             ? MIN_SQRT_RATIO + 1
             : MAX_SQRT_RATIO - 1;
-        (int256 amount0, int amount1) = (0, 0);
+        (int amount0, int amount1) = (0, 0);
         try
         pool.swap(
             address(this),

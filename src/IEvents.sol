@@ -19,6 +19,24 @@ interface IEvents {
         uint128 liquidity,
         int24 tick
     );
+    event Mint(
+        address sender,
+        address indexed owner,
+        int24 indexed tickLower,
+        int24 indexed tickUpper,
+        uint128 amount,
+        uint256 amount0,
+        uint256 amount1
+    );
+    event Burn(
+        address indexed owner,
+        int24 indexed tickLower,
+        int24 indexed tickUpper,
+        uint128 amount,
+        uint256 amount0,
+        uint256 amount1
+    );
+    event CollectProtocol(address indexed sender, address indexed recipient, uint128 amount0, uint128 amount1);
 
     event Sync(uint112 reserve0, uint112 reserve1);
 }
