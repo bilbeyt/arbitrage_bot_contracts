@@ -116,15 +116,15 @@ contract UniswapBotV2 is Ownable, IFlashLoanRecipient {
         uint borrowAmount,
         address[] calldata pools,
         uint[] calldata types,
-        uint[] calldata amountOuts,
-        uint bribe
+        uint minAmountOut,
+        uint bribePercent
     ) external onlyOwner {
         bytes memory data = abi.encode(
             address(this),
             pools,
             types,
-            amountOuts,
-            bribe
+            minAmountOut,
+            bribePercent
         );
         IERC20[] memory assets = new IERC20[](1);
         uint[] memory amounts = new uint[](1);
@@ -202,25 +202,25 @@ contract UniswapBotV2 is Ownable, IFlashLoanRecipient {
     function makeV2Trade(
         address poolAddress,
         address tokenIn,
-        uint amountIn,
-        uint amountOut
+        uint amountIn
     ) internal returns (address, uint) {
         IUniswapV2Pair pair = IUniswapV2Pair(poolAddress);
-        address tokenOut = pair.token0() == tokenIn
-            ? pair.token1()
-            : pair.token0();
+        (address tokenOut, uint amountOut) = getV2AmountOut(
+            poolAddress,
+            tokenIn,
+            amountIn
+        );
         uint amount0Out = pair.token0() == tokenOut ? amountOut : 0;
         uint amount1Out = pair.token1() == tokenOut ? amountOut : 0;
         IERC20(tokenIn).safeTransfer(poolAddress, amountIn);
         try
         pair.swap(amount0Out, amount1Out, address(this), bytes(""))
-        {} catch (bytes memory) {
-            revert(
-                string.concat(
-                "Malicious Pool: ",
+        {} catch (bytes memory reasonBytes) {
+            string memory extra = string.concat(
+                " Malicious Pool: ",
                 Strings.toHexString(poolAddress)
-            )
             );
+            revert(string.concat(string(reasonBytes), extra));
         }
         return (tokenOut, amountOut);
     }
@@ -248,13 +248,12 @@ contract UniswapBotV2 is Ownable, IFlashLoanRecipient {
         returns (int firstAmount, int secondAmount) {
             amount0 = firstAmount;
             amount1 = secondAmount;
-        } catch (bytes memory) {
-            revert(
-                string.concat(
-                "Malicious Pool: ",
+        } catch (bytes memory reasonBytes) {
+            string memory extra = string.concat(
+                " Malicious Pool: ",
                 Strings.toHexString(poolAddress)
-            )
             );
+            revert(string.concat(string(reasonBytes), extra));
         }
         address tokenOut = zeroForOne ? pool.token1() : pool.token0();
         return (tokenOut, uint(-(zeroForOne ? amount1 : amount0)));
@@ -264,21 +263,19 @@ contract UniswapBotV2 is Ownable, IFlashLoanRecipient {
         address[] memory pools,
         uint[] memory types,
         address tokenIn,
-        uint amount,
-        uint[] memory amountOuts
+        uint amount
     ) internal returns (uint) {
         address token = tokenIn;
         for (uint i = 0; i < pools.length; i++) {
             if (types[i] == uint(TradeType.V2)) {
-                (token, amount) = makeV2Trade(
-                    pools[i],
-                    token,
-                    amount,
-                    amountOuts[i]
-                );
+                (token, amount) = makeV2Trade(pools[i], token, amount);
             } else {
                 (token, amount) = makeV3Trade(pools[i], token, amount);
             }
+            require(
+                IERC20(token).balanceOf(address(this)) >= amount,
+                string.concat("Malicious Pool: ", Strings.toHexString(pools[i]))
+            );
         }
         return amount;
     }
@@ -294,24 +291,25 @@ contract UniswapBotV2 is Ownable, IFlashLoanRecipient {
             address _sender,
             address[] memory pools,
             uint[] memory types,
-            uint[] memory amountOuts,
-            uint bribe
-        ) = abi.decode(userData, (address, address[], uint[], uint[], uint));
+            uint minAmountOut,
+            uint bribePercent
+        ) = abi.decode(userData, (address, address[], uint[], uint, uint));
         require(_sender == address(this), "address should be bot contract");
         uint payment = amounts[0] + feeAmounts[0];
         uint amountOut = makeTrades(
             pools,
             types,
             address(tokens[0]),
-            amounts[0],
-            amountOuts
+            amounts[0]
         );
+        require(amountOut >= minAmountOut, "insufficient amountOut");
         require(amountOut > payment, "not profitable");
         tokens[0].safeTransfer(VAULT_ADDRESS, payment);
-        (, uint profit) = amountOut.trySub(payment);
+        uint profit = amountOut.sub(payment);
+        uint bribe = profit.mul(bribePercent) / 100;
         if (address(tokens[0]) == address(weth9)) {
-            (, uint profitMinusbribe) = profit.trySub(bribe);
             weth9.withdraw(profit);
+            uint profitMinusbribe = profit.sub(bribe);
             (bool sent, ) = payable(owner()).call{value: profitMinusbribe}("");
             require(sent, "can not send eth");
         } else {
