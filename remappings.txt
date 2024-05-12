@@ -1,0 +1,9 @@
+@balancer-labs/v2-interfaces/=lib/balancer-v2-monorepo/pkg/interfaces/
+@openzeppelin/=lib/openzeppelin-contracts/
+@uniswap/v3-periphery=node_modules/@uniswap/v3-periphery/
+@uniswap/v2-periphery=node_modules/@uniswap/v2-periphery/
+@uniswap/v3-core=node_modules/@uniswap/v3-core/
+@uniswap/v2-core=node_modules/@uniswap/v2-core/
+
+@uniswap/universal-router/=lib/universal-router/
+solmate/=lib/solmate/
